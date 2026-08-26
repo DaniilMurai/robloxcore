@@ -56,6 +56,7 @@ export type WorldDef = {
 	conveyor: PartStyle,
 	dropper: PartStyle,
 	collector: PartStyle,
+	drop: PartStyle, -- one object on the belt; its colour is what level 0 looks like
 }
 
 export type PassDef = { id: string, gamepassId: number, effect: Effect }

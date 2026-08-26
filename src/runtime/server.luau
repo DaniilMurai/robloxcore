@@ -9,6 +9,7 @@ local Economy = require("../logic/economy")
 local Progression = require("../logic/progression")
 local Profile = require("../logic/profile")
 local Events = require("../logic/events")
+local Flow = require("../logic/flow")
 
 type ProfileData = Types.ProfileData
 type TitleConfig = Types.TitleConfig
@@ -48,6 +49,7 @@ export type Deps = {
 export type GameServer = {
 	start: (self: GameServer) -> (),
 	profileOf: (self: GameServer, userId: number) -> ProfileData?,
+	visibleLevel: (self: GameServer) -> number,
 }
 
 local Runtime = {}
@@ -71,6 +73,17 @@ end
 
 function Runtime:profileOf(userId: number): ProfileData?
 	return self._profiles[userId]
+end
+
+-- One shared base shows the furthest-along player on the server, not a sum and not the
+-- last one to tick: a sum would race ahead of anything a single player recognises as his,
+-- and the last-one-wins version flickers between players. Per-player plots replace this.
+function Runtime:visibleLevel(): number
+	local highest = 0
+	for _, profile in self._profiles do
+		highest = math.max(highest, Flow.level(profile))
+	end
+	return highest
 end
 
 function Runtime:_snapshot(userId: number): StateSnapshot?

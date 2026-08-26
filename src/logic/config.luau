@@ -51,7 +51,7 @@ local function validateEffect(effect: any, path: string): string?
 	return nil
 end
 
-local WORLD_PARTS = { "platform", "conveyor", "dropper", "collector" }
+local WORLD_PARTS = { "platform", "conveyor", "dropper", "collector", "drop" }
 
 -- Numeric triples: {x, y, z} in studs and {r, g, b} in 0..1. Material stays a bare string
 -- here; only runtime/base.luau can resolve it against Enum.Material.
