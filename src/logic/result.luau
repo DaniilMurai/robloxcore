@@ -11,6 +11,7 @@ export type ErrorCode =
 	| "ConfigInvalid"
 	| "ProfileNotLoaded"
 	| "ProfileLocked"
+	| "ProfileCorrupt"
 	| "SchemaTooNew"
 	| "DataStoreUnavailable"
 	| "ReceiptAlreadyProcessed"
@@ -31,6 +32,7 @@ local VALID_CODES: { [string]: true } = {
 	ConfigInvalid = true,
 	ProfileNotLoaded = true,
 	ProfileLocked = true,
+	ProfileCorrupt = true,
 	SchemaTooNew = true,
 	DataStoreUnavailable = true,
 	ReceiptAlreadyProcessed = true,
