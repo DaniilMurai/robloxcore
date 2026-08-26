@@ -102,8 +102,10 @@ function DataStoreAdapter:load(userId: number): Result<ProfileData>
 	session.Data.processedReceipts = pruned.processedReceipts
 
 	self._saved[userId] = 0
+	-- ProfileStore fires OnSessionEnd first and OnAfterSave for the same final write right
+	-- after it, so this counter must survive the cleanup below and tolerate being absent.
 	session.OnAfterSave:Connect(function()
-		self._saved[userId] += 1
+		self._saved[userId] = (self._saved[userId] or 0) + 1
 	end)
 
 	session.OnSessionEnd:Connect(function()
@@ -112,7 +114,6 @@ function DataStoreAdapter:load(userId: number): Result<ProfileData>
 		-- BindToClose would tell the player their save was stolen.
 		local ours = self._releasing[userId] == true
 		self._releasing[userId] = nil
-		self._saved[userId] = nil
 		if opts.onSessionEnd and not ours then
 			opts.onSessionEnd(userId)
 		end
