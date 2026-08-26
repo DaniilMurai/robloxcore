@@ -1,5 +1,5 @@
 --!strict
--- Analytics payloads, assembled but never sent: AnalyticsService lives in the adapter
+-- Analytics payloads, assembled but never sent: the reporting service lives in the adapter
 -- layer. Field names mirror LogEconomyEvent/LogProgressionEvent parameters so the adapter
 -- is a straight hand-off, and the enum-shaped fields stay strings here — Enum.* is a
 -- Roblox global the pure layer cannot touch.
@@ -9,7 +9,8 @@ local Types = require("./types")
 type ProfileData = Types.ProfileData
 
 export type EconomyFlow = "Sink" | "Source"
-export type ProgressionStatus = "Begin" | "Complete" | "Abandon" | "Fail"
+-- Mirrors Enum.AnalyticsProgressionType, whose items are Custom/Start/Fail/Complete.
+export type ProgressionStatus = "Custom" | "Start" | "Fail" | "Complete"
 
 export type EconomyEvent = {
 	flowType: EconomyFlow,
