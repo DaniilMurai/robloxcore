@@ -325,6 +325,73 @@ local function validate(raw: any): Result<TitleConfig>
 		productIds[product.id] = true
 	end
 
+	if not isTable(raw.zones) then
+		return fail("zones must be an array")
+	end
+	local zoneIds: { [string]: true } = {}
+	local gatedUpgrades: { [string]: string } = {}
+	for i, zone in raw.zones :: any do
+		local path = ("zones[%d]"):format(i)
+		if type(zone) ~= "table" then
+			return fail(("%s must be a table, got %s"):format(path, type(zone)))
+		end
+		if not isString(zone.id) then
+			return fail(("%s.id must be a non-empty string"):format(path))
+		end
+		if not isString(zone.name) then
+			return fail(("%s.name must be a non-empty string"):format(path))
+		end
+		if not isNumber(zone.cost) then
+			return fail(("%s.cost must be a number"):format(path))
+		end
+		-- A free zone would open on the first snapshot and never read as a purchase.
+		if zone.cost <= 0 then
+			return fail(("%s.cost must be > 0, got %s"):format(path, tostring(zone.cost)))
+		end
+		if not isString(zone.currency) then
+			return fail(("%s.currency must be a non-empty string"):format(path))
+		end
+		if not currencyIds[zone.currency] then
+			return fail(("%s.currency references unknown currency %q"):format(path, zone.currency))
+		end
+		if not isTable(zone.unlocks) then
+			return fail(("%s.unlocks must be an array"):format(path))
+		end
+		for j, upgradeId in zone.unlocks :: any do
+			if not isString(upgradeId) then
+				return fail(("%s.unlocks[%d] must be a non-empty string"):format(path, j))
+			end
+			if not upgradeIds[upgradeId] then
+				return fail(("%s.unlocks[%d] references unknown upgrade %q"):format(path, j, upgradeId))
+			end
+			-- Two zones gating one upgrade means the player cannot tell which one to buy,
+			-- and the HUD has one lock to show.
+			if gatedUpgrades[upgradeId] then
+				return fail(
+					("%s.unlocks[%d]: upgrade %q is already gated by zone %q"):format(
+						path,
+						j,
+						upgradeId,
+						gatedUpgrades[upgradeId]
+					)
+				)
+			end
+			gatedUpgrades[upgradeId] = zone.id
+		end
+		if type(zone.position) ~= "table" or #zone.position ~= 3 then
+			return fail(("%s.position must be an array of 3 numbers"):format(path))
+		end
+		for j, component in zone.position do
+			if not isNumber(component) then
+				return fail(("%s.position[%d] must be a number"):format(path, j))
+			end
+		end
+		if zoneIds[zone.id] then
+			return fail(("%s.id %q is duplicated"):format(path, zone.id))
+		end
+		zoneIds[zone.id] = true
+	end
+
 	local worldErr = validateWorld(raw.world)
 	if worldErr then
 		return fail(worldErr)

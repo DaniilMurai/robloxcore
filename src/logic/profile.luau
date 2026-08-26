@@ -28,6 +28,7 @@ function Profile.new(config: TitleConfig, now: number): ProfileData
 		wallet = wallet,
 		upgrades = {},
 		rebirths = 0,
+		zones = {},
 		processedReceipts = {},
 		stats = {
 			firstJoinAt = now,
@@ -58,10 +59,23 @@ function Profile.migrate(raw: any): Result<ProfileData>
 		return Result.ok(raw :: ProfileData)
 	end
 
-	-- version < SCHEMA_VERSION: SCHEMA_VERSION is still 1, so no prior schema exists to
-	-- migrate from. A future bump adds `elseif version == N then ... end` steps above this
-	-- line instead of rewriting the function.
-	return Result.err("ProfileCorrupt", ("no migration path from schema v%d"):format(version))
+	-- Steps are cumulative and each one only adds what its version introduced, so a v1 save
+	-- from a year ago walks the same path as a fresh one. The raw table is copied, never
+	-- edited in place: the caller still holds it if a later step fails.
+	local migrated = table.clone(raw)
+
+	if version == 1 then
+		-- v2 added zones. An old save owns none, which is exactly what a fresh profile has.
+		migrated.zones = {}
+		version = 2
+	end
+
+	if version ~= SCHEMA_VERSION then
+		return Result.err("ProfileCorrupt", ("no migration path from schema v%d"):format(raw.schemaVersion))
+	end
+
+	migrated.schemaVersion = SCHEMA_VERSION
+	return Result.ok(migrated :: ProfileData)
 end
 
 function Profile.applyProductGrant(

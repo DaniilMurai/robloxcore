@@ -16,6 +16,9 @@ export type ErrorCode =
 	| "DataStoreUnavailable"
 	| "ReceiptAlreadyProcessed"
 	| "UnknownProduct"
+	| "UnknownZone"
+	| "ZoneAlreadyOwned"
+	| "UpgradeLocked"
 
 export type Err = { ok: false, code: ErrorCode, message: string }
 export type Ok<T> = { ok: true, value: T }
@@ -37,6 +40,9 @@ local VALID_CODES: { [string]: true } = {
 	DataStoreUnavailable = true,
 	ReceiptAlreadyProcessed = true,
 	UnknownProduct = true,
+	UnknownZone = true,
+	ZoneAlreadyOwned = true,
+	UpgradeLocked = true,
 }
 
 local Result = {}

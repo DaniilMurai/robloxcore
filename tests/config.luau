@@ -185,6 +185,51 @@ return function(t)
 		not badMaterial.ok and badMaterial.message or nil
 	)
 
+	t:errs(
+		"a free zone is refused",
+		broken(function(c)
+			c.zones[1].cost = 0
+		end),
+		"ConfigInvalid"
+	)
+	t:errs(
+		"a zone in an unknown currency is refused",
+		broken(function(c)
+			c.zones[1].currency = "gems"
+		end),
+		"ConfigInvalid"
+	)
+	t:errs(
+		"a zone unlocking an unknown upgrade is refused",
+		broken(function(c)
+			c.zones[1].unlocks = { "no_such_upgrade" }
+		end),
+		"ConfigInvalid"
+	)
+	-- Two gates on one upgrade leave the player no way to know which zone to buy
+	t:errs(
+		"two zones gating one upgrade are refused",
+		broken(function(c)
+			c.zones[2].unlocks = { "slicer" }
+		end),
+		"ConfigInvalid"
+	)
+	t:errs(
+		"a duplicated zone id is refused",
+		broken(function(c)
+			c.zones[2].id = c.zones[1].id
+			c.zones[2].unlocks = {}
+		end),
+		"ConfigInvalid"
+	)
+	t:errs(
+		"a two-component zone position is refused",
+		broken(function(c)
+			c.zones[1].position = { 5, 0 }
+		end),
+		"ConfigInvalid"
+	)
+
 	-- original fixture is untouched by validation and by the shallow clones above
 	t:eq("validate does not mutate the raw table", fixture.rebirth ~= nil, true)
 	t:eq("validate does not mutate upgrades growth", fixture.upgrades[1].growth, 1.35)

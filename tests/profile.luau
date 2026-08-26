@@ -8,10 +8,11 @@ local serde = require("@lune/serde")
 
 local function newProfile(wallet: { [string]: number }, processedReceipts: { [string]: number })
 	return {
-		schemaVersion = 1,
+		schemaVersion = 2,
 		wallet = wallet,
 		upgrades = {},
 		rebirths = 0,
+		zones = {},
 		processedReceipts = processedReceipts,
 		stats = {
 			firstJoinAt = 0,
@@ -37,7 +38,8 @@ return function(t)
 	-- Profile.new
 
 	local fresh = Profile.new(config, 1000)
-	t:eq("new sets schemaVersion", fresh.schemaVersion, 1)
+	t:eq("new sets schemaVersion", fresh.schemaVersion, 2)
+	t:eq("new owns no zones", next(fresh.zones), nil)
 	t:eq("new fills wallet with starting balance of each configured currency", fresh.wallet.coins, 0)
 	t:eq("new sets rebirths to 0", fresh.rebirths, 0)
 	t:eq("new starts with no processed receipts", next(fresh.processedReceipts), nil)
@@ -83,8 +85,35 @@ return function(t)
 
 	-- Profile.migrate
 
-	local currentVersion = Profile.migrate({ schemaVersion = 1, wallet = {}, processedReceipts = {} })
+	local currentVersion = Profile.migrate({ schemaVersion = 2, wallet = {}, processedReceipts = {} })
 	t:check("migrate accepts the current schema version", currentVersion.ok)
+
+	-- A v1 save is what every player already on disk has: losing a wallet here is the one
+	-- migration bug nobody forgives.
+	local old = {
+		schemaVersion = 1,
+		wallet = { coins = 4210 },
+		upgrades = { conveyor = 7 },
+		rebirths = 2,
+		processedReceipts = { ["r-1"] = 100 },
+		stats = { firstJoinAt = 1, lastSeenAt = 2, playtimeSeconds = 3, totalEarned = { coins = 9000 } },
+	}
+	local migrated = Profile.migrate(old)
+	t:check("v1 migrates", migrated.ok, if not migrated.ok then migrated.message else nil)
+	if migrated.ok then
+		t:eq("migration keeps the wallet", migrated.value.wallet.coins, 4210)
+		t:eq("migration keeps upgrade levels", migrated.value.upgrades.conveyor, 7)
+		t:eq("migration keeps rebirths", migrated.value.rebirths, 2)
+		t:eq("migration keeps receipts", migrated.value.processedReceipts["r-1"], 100)
+		t:eq("migration keeps lifetime totals", migrated.value.stats.totalEarned.coins, 9000)
+		t:eq("migration stamps the current version", migrated.value.schemaVersion, 2)
+		t:eq("a migrated save owns no zones", next(migrated.value.zones), nil)
+	end
+	t:eq("migration does not touch the raw save", old.schemaVersion, 1)
+	t:eq("migration does not add zones to the raw save", (old :: any).zones, nil)
+
+	local noPath = Profile.migrate({ schemaVersion = 0, wallet = {} })
+	t:errs("a version below every step is ProfileCorrupt", noPath, "ProfileCorrupt")
 
 	local tooNew = Profile.migrate({ schemaVersion = 999, wallet = {} })
 	t:errs("migrate with a newer schemaVersion is SchemaTooNew", tooNew, "SchemaTooNew")

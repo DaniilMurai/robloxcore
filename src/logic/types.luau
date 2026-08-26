@@ -2,7 +2,7 @@
 -- Shared data shapes from contracts.md. Forms only — economy/progression logic
 -- lands in later tasks, this module has no behaviour beyond the type exports.
 
-local SCHEMA_VERSION = 1 -- core's version; titles never override it
+local SCHEMA_VERSION = 2 -- core's version; titles never override it
 
 export type Wallet = { [string]: number } -- currencyId -> balance, >= 0
 export type Upgrades = { [string]: number } -- upgradeId -> level, >= 0
@@ -12,6 +12,7 @@ export type ProfileData = {
 	wallet: Wallet,
 	upgrades: Upgrades,
 	rebirths: number, -- >= 0
+	zones: { [string]: true }, -- bought zoneIds; permanent, a rebirth does not take them (v2)
 	processedReceipts: { [string]: number }, -- receiptId -> os.time() of grant
 	stats: {
 		firstJoinAt: number, -- os.time(), UTC seconds
@@ -59,6 +60,19 @@ export type WorldDef = {
 	drop: PartStyle, -- one object on the belt; its colour is what level 0 looks like
 }
 
+-- A zone is a piece of the base that stays shut until it is bought, and the upgrades it
+-- lists stay unbuyable while it is. `position` is an offset from the base origin in
+-- base-local studs: which part of the belt a zone claims is a title's decision, unlike
+-- the rest of the layout.
+export type ZoneDef = {
+	id: string,
+	name: string,
+	cost: number,
+	currency: string, -- id from currencies
+	unlocks: { string }, -- upgradeIds gated behind this zone
+	position: { number }, -- {x, y, z} offset from the base origin
+}
+
 export type PassDef = { id: string, gamepassId: number, effect: Effect }
 export type ProductDef = { id: string, productId: number, grant: { currency: string, amount: number } }
 
@@ -69,6 +83,7 @@ export type StateSnapshot = {
 	upgrades: Upgrades,
 	rebirths: number,
 	incomePerSecond: number,
+	zones: { string }, -- bought zoneIds
 	-- Ownership comes from the platform, never from the profile, so the client is told
 	-- what the server currently sees instead of remembering anything itself.
 	ownedPassIds: { string },
@@ -78,6 +93,7 @@ export type Action =
 	{ kind: "BuyUpgrade", upgradeId: string }
 	| { kind: "Rebirth" }
 	| { kind: "PromptPass", passId: string }
+	| { kind: "BuyZone", zoneId: string }
 
 export type TitleConfig = {
 	slug: string,
@@ -88,6 +104,7 @@ export type TitleConfig = {
 	rebirth: RebirthDef,
 	passes: { PassDef },
 	products: { ProductDef },
+	zones: { ZoneDef },
 	world: WorldDef,
 }
 

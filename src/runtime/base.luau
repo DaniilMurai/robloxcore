@@ -26,6 +26,9 @@ export type Spec = {
 
 export type Base = {
 	model: Model,
+	origin: CFrame,
+	deckHeight: number, -- walking surface above the origin
+	beltY: number, -- local height an object travels at
 	platform: BasePart,
 	conveyor: BasePart,
 	dropper: BasePart,
@@ -40,6 +43,19 @@ export type Base = {
 export type FlowSpec = {
 	style: Types.PartStyle, -- config world.drop; its colour is what level 0 looks like
 	levelOf: () -> number,
+	origin: CFrame?, -- defaults to the base's own dropper; a zone feeds the same belt
+}
+
+export type ZoneSpec = {
+	zones: { Types.ZoneDef },
+	world: WorldDef,
+	drop: Types.PartStyle,
+	ownedOf: () -> { [string]: true },
+	levelOf: () -> number,
+}
+
+export type ZoneBoard = {
+	stop: (self: ZoneBoard) -> (),
 }
 
 export type BaseFlow = {
@@ -92,6 +108,9 @@ function Base.build(spec: Spec): Base
 
 	local base: Base = {
 		model = model,
+		origin = spec.origin,
+		deckHeight = deck,
+		beltY = belt + BELT_CLEARANCE,
 		platform = platform,
 		conveyor = conveyor,
 		dropper = dropper,
@@ -112,8 +131,8 @@ function Base.flow(base: Base, spec: FlowSpec): BaseFlow
 	drops.Name = "Drops"
 	drops.Parent = base.model
 
-	local travelSeconds = (base.dropTarget.Position - base.dropOrigin.Position).Magnitude
-		/ BELT_STUDS_PER_SECOND
+	local origin = spec.origin or base.dropOrigin
+	local travelSeconds = (base.dropTarget.Position - origin.Position).Magnitude / BELT_STUDS_PER_SECOND
 	local liveCap = Flow.liveCap(travelSeconds)
 	local running = true
 
@@ -130,7 +149,7 @@ function Base.flow(base: Base, spec: FlowSpec): BaseFlow
 					size = spec.style.size,
 					color = Flow.tint(spec.style.color, level),
 					material = spec.style.material,
-				}, base.dropOrigin, drops)
+				}, origin, drops)
 				-- A player standing on the belt must not be shoved off it by the scenery.
 				part.CanCollide = false
 				local tween = TweenService:Create(
@@ -153,6 +172,109 @@ function Base.flow(base: Base, spec: FlowSpec): BaseFlow
 		end,
 	}
 	return flow
+end
+
+local LOCKED_TRANSPARENCY = 0.65
+local ZONE_PAD_MARGIN = 3 -- studs of pad around the dropper's footprint
+local ZONE_PAD_THICKNESS = 0.4
+local ZONE_POLL_SECONDS = 1
+
+-- Zones are built shut and opened in place, never built on purchase: a zone that appears
+-- out of nothing gives the player no reason to save up for it.
+function Base.zones(base: Base, spec: ZoneSpec): ZoneBoard
+	local folder = Instance.new("Folder")
+	folder.Name = "Zones"
+	folder.Parent = base.model
+
+	local dropperStyle = spec.world.dropper
+	local dropperWidth, dropperHeight, dropperDepth =
+		dropperStyle.size[1], dropperStyle.size[2], dropperStyle.size[3]
+
+	local built: {
+		[string]: { parts: { BasePart }, sign: TextLabel, flow: BaseFlow?, def: Types.ZoneDef },
+	} =
+		{}
+
+	for _, zone in spec.zones do
+		local at = base.origin
+			* CFrame.new(zone.position[1], base.deckHeight + zone.position[2], zone.position[3])
+
+		local pad = World.fromStyle({
+			size = {
+				dropperWidth + ZONE_PAD_MARGIN,
+				ZONE_PAD_THICKNESS,
+				dropperDepth + ZONE_PAD_MARGIN,
+			},
+			color = spec.world.platform.color,
+			material = spec.world.platform.material,
+		}, at * CFrame.new(0, ZONE_PAD_THICKNESS / 2, 0), folder)
+		pad.Name = `{zone.id}_pad`
+
+		local dropper = World.fromStyle(
+			dropperStyle,
+			at * CFrame.new(0, ZONE_PAD_THICKNESS + dropperHeight / 2, 0),
+			folder
+		)
+		dropper.Name = zone.id
+
+		local surface = World.sign(
+			zone.name,
+			Vector2.new(dropperWidth * SIGN_PIXELS_PER_STUD, dropperHeight * SIGN_PIXELS_PER_STUD),
+			dropper
+		)
+		built[zone.id] = {
+			parts = { pad, dropper },
+			sign = surface:FindFirstChildOfClass("TextLabel") :: TextLabel,
+			def = zone,
+		}
+	end
+
+	local running = true
+
+	local function apply(owned: { [string]: true })
+		for zoneId, entry in built do
+			local isOwned = owned[zoneId] == true
+			for _, part in entry.parts do
+				part.Transparency = if isOwned then 0 else LOCKED_TRANSPARENCY
+				part.CanCollide = isOwned
+			end
+			entry.sign.Text = if isOwned then entry.def.name else `{entry.def.name}\n{entry.def.cost}`
+			if isOwned and entry.flow == nil then
+				entry.flow = Base.flow(base, {
+					style = spec.drop,
+					levelOf = spec.levelOf,
+					-- The dropper may stand off to the side, but what it drops has to land on
+					-- the belt, so the stream always starts over the belt's centre line.
+					origin = base.origin * CFrame.new(entry.def.position[1], base.beltY, 0),
+				})
+			end
+		end
+	end
+
+	apply(spec.ownedOf())
+	-- Polled rather than pushed: the server already owns the profile and the world reads
+	-- from it, and one poll a second is cheaper than threading a signal through the core.
+	task.spawn(function()
+		while running do
+			task.wait(ZONE_POLL_SECONDS)
+			if running then
+				apply(spec.ownedOf())
+			end
+		end
+	end)
+
+	local board: ZoneBoard = {
+		stop = function(_self: ZoneBoard)
+			running = false
+			for _, entry in built do
+				if entry.flow then
+					entry.flow:stop()
+				end
+			end
+			folder:Destroy()
+		end,
+	}
+	return board
 end
 
 return Base

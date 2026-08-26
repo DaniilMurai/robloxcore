@@ -37,6 +37,7 @@ function Hud.new(config: TitleConfig, onAction: (action: Action) -> ())
 		_onAction = onAction,
 		_upgradeButtons = {},
 		_passButtons = {},
+		_zoneButtons = {},
 		_snapshot = nil,
 	}, Hud)
 end
@@ -67,7 +68,7 @@ function Hud:mount(parent: Instance)
 	self._income.Position = UDim2.new(0, 12, 0, 52)
 
 	local buttons = Instance.new("Frame")
-	buttons.Size = UDim2.new(0, 320, 0, 56 * (#config.upgrades + #config.passes + 1))
+	buttons.Size = UDim2.new(0, 320, 0, 56 * (#config.upgrades + #config.zones + #config.passes + 1))
 	buttons.Position = UDim2.new(0, 16, 0, 124)
 	buttons.BackgroundTransparency = 1
 	buttons.Parent = screen
@@ -95,6 +96,27 @@ function Hud:mount(parent: Instance)
 			self._onAction({ kind = "BuyUpgrade", upgradeId = def.id })
 		end)
 		self._upgradeButtons[def.id] = button
+	end
+
+	for _, def in config.zones do
+		local button = Instance.new("TextButton")
+		button.Size = UDim2.new(1, 0, 0, 48)
+		button.BackgroundColor3 = BACKDROP
+		button.BackgroundTransparency = 0.15
+		button.TextColor3 = Color3.new(1, 1, 1)
+		button.TextScaled = true
+		button.Font = Enum.Font.GothamBold
+		button.Text = def.name
+		button.Parent = buttons
+
+		local zoneCorner = Instance.new("UICorner")
+		zoneCorner.CornerRadius = UDim.new(0, 10)
+		zoneCorner.Parent = button
+
+		button.Activated:Connect(function()
+			self._onAction({ kind = "BuyZone", zoneId = def.id })
+		end)
+		self._zoneButtons[def.id] = button
 	end
 
 	for _, def in config.passes do
@@ -150,10 +172,31 @@ function Hud:update(snapshot: StateSnapshot)
 	self._balance.Text = ("%d %s"):format(balance, self._currencyShort)
 	self._income.Text = ("+%.1f/s · rebirth %d"):format(snapshot.incomePerSecond, snapshot.rebirths)
 
+	local ownedZones: { [string]: boolean } = {}
+	for _, zoneId in snapshot.zones do
+		ownedZones[zoneId] = true
+	end
+	for _, def in config.zones do
+		local button = self._zoneButtons[def.id]
+		if button then
+			if ownedZones[def.id] then
+				button.Text = ("%s · open"):format(def.name)
+				button.TextColor3 = MUTED
+			else
+				button.Text = ("%s · %d"):format(def.name, def.cost)
+				button.TextColor3 = if balance >= def.cost then Color3.new(1, 1, 1) else MUTED
+			end
+		end
+	end
+
 	for _, def in config.upgrades do
 		local button = self._upgradeButtons[def.id]
 		local level = snapshot.upgrades[def.id] or 0
-		if level >= def.maxLevel then
+		local gate = Progression.gateOf(config, def.id)
+		if gate and not ownedZones[gate] then
+			button.Text = ("%s · needs %s"):format(def.name, gate)
+			button.TextColor3 = MUTED
+		elseif level >= def.maxLevel then
 			button.Text = ("%s · MAX"):format(def.name)
 			button.TextColor3 = MUTED
 		else
@@ -186,9 +229,14 @@ end
 -- Refusals surface on the button that caused them and fade back on the next update:
 -- a snapshot arrives at least every heartbeat, so nothing stays red for long.
 function Hud:deny(action: Action, code: string)
-	local button = if action.kind == "BuyUpgrade"
-		then self._upgradeButtons[action.upgradeId]
-		else self._rebirth
+	local button
+	if action.kind == "BuyUpgrade" then
+		button = self._upgradeButtons[action.upgradeId]
+	elseif action.kind == "BuyZone" then
+		button = self._zoneButtons[action.zoneId]
+	else
+		button = self._rebirth
+	end
 	if button then
 		button.Text = code
 		button.TextColor3 = DENIED

@@ -49,8 +49,11 @@ export type Deps = {
 export type GameServer = {
 	start: (self: GameServer) -> (),
 	profileOf: (self: GameServer, userId: number) -> ProfileData?,
-	visibleLevel: (self: GameServer) -> number,
+	visible: (self: GameServer) -> VisibleState,
 }
+
+-- What the one shared base shows. Per-player plots replace this with a profile each.
+export type VisibleState = { level: number, zones: { [string]: true } }
 
 local Runtime = {}
 Runtime.__index = Runtime
@@ -77,13 +80,20 @@ end
 
 -- One shared base shows the furthest-along player on the server, not a sum and not the
 -- last one to tick: a sum would race ahead of anything a single player recognises as his,
--- and the last-one-wins version flickers between players. Per-player plots replace this.
-function Runtime:visibleLevel(): number
-	local highest = 0
+-- and the last-one-wins version flickers between players. Level and zones come from the
+-- same player, or a base could run a zone's dropper for someone who has not bought it.
+function Runtime:visible(): VisibleState
+	local best, bestLevel = nil, -1
 	for _, profile in self._profiles do
-		highest = math.max(highest, Flow.level(profile))
+		local level = Flow.level(profile)
+		if level > bestLevel then
+			best, bestLevel = profile, level
+		end
 	end
-	return highest
+	if best == nil then
+		return { level = 0, zones = {} }
+	end
+	return { level = bestLevel, zones = best.zones }
 end
 
 function Runtime:_snapshot(userId: number): StateSnapshot?
@@ -93,11 +103,17 @@ function Runtime:_snapshot(userId: number): StateSnapshot?
 	end
 	local deps: Deps = self._deps
 	local owned = deps.market:ownedPassIds(userId)
+	local zoneIds = {}
+	for zoneId in profile.zones do
+		table.insert(zoneIds, zoneId)
+	end
+	table.sort(zoneIds)
 	return {
 		wallet = profile.wallet,
 		upgrades = profile.upgrades,
 		rebirths = profile.rebirths,
 		incomePerSecond = Economy.incomePerSecond(profile, deps.config, owned),
+		zones = zoneIds,
 		ownedPassIds = owned,
 	}
 end
@@ -190,6 +206,17 @@ function Runtime:_act(userId: number, action: Action): Result<StateSnapshot>
 			local spent = Economy.upgradeCost(def, level - 1)
 			deps.analytics:economy(player, Events.economy(bought.value, def.currency, -spent, "Shop"))
 			deps.analytics:progression(player, Events.progression(bought.value, action.upgradeId, level))
+		end
+	elseif action.kind == "BuyZone" then
+		local bought = Progression.buyZone(profile, deps.config, tostring(action.zoneId))
+		if not bought.ok then
+			return bought
+		end
+		self:_commit(userId, bought.value)
+
+		local def = Progression.findZone(deps.config, action.zoneId)
+		if player and def then
+			deps.analytics:economy(player, Events.economy(bought.value, def.currency, -def.cost, "Shop"))
 		end
 	elseif action.kind == "Rebirth" then
 		local reborn = Progression.rebirth(profile, deps.config)

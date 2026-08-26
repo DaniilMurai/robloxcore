@@ -12,6 +12,49 @@ type Result<T> = Result.Result<T>
 
 local Progression = {}
 
+-- Which zone keeps an upgrade shut, if any. Config.validate guarantees at most one, so
+-- the first hit is the answer.
+function Progression.gateOf(config: TitleConfig, upgradeId: string): string?
+	for _, zone in config.zones do
+		for _, gated in zone.unlocks do
+			if gated == upgradeId then
+				return zone.id
+			end
+		end
+	end
+	return nil
+end
+
+function Progression.findZone(config: TitleConfig, zoneId: string): Types.ZoneDef?
+	for _, zone in config.zones do
+		if zone.id == zoneId then
+			return zone
+		end
+	end
+	return nil
+end
+
+function Progression.buyZone(profile: ProfileData, config: TitleConfig, zoneId: string): Result<ProfileData>
+	local def = Progression.findZone(config, zoneId)
+	if not def then
+		return Result.err("UnknownZone", zoneId)
+	end
+	-- Charging twice for the same zone is the one failure a player notices immediately.
+	if profile.zones[zoneId] then
+		return Result.err("ZoneAlreadyOwned", zoneId)
+	end
+
+	local spent = Economy.spend(profile, def.currency, def.cost)
+	if not spent.ok then
+		return spent
+	end
+
+	local updated = table.clone(spent.value)
+	updated.zones = table.clone(spent.value.zones)
+	updated.zones[zoneId] = true
+	return Result.ok(updated)
+end
+
 function Progression.buyUpgrade(
 	profile: ProfileData,
 	config: TitleConfig,
@@ -20,6 +63,11 @@ function Progression.buyUpgrade(
 	local def = Economy.findUpgrade(config, upgradeId)
 	if not def then
 		return Result.err("UnknownUpgrade", upgradeId)
+	end
+
+	local gate = Progression.gateOf(config, upgradeId)
+	if gate and not profile.zones[gate] then
+		return Result.err("UpgradeLocked", ("%s needs zone %s"):format(upgradeId, gate))
 	end
 
 	local level = profile.upgrades[upgradeId] or 0

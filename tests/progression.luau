@@ -9,10 +9,11 @@ local serde = require("@lune/serde")
 
 local function newProfile(wallet: { [string]: number }, upgrades: { [string]: number }, rebirths: number)
 	return {
-		schemaVersion = 1,
+		schemaVersion = 2,
 		wallet = wallet,
 		upgrades = upgrades,
 		rebirths = rebirths,
+		zones = {},
 		processedReceipts = { some_receipt = 42 },
 		stats = {
 			firstJoinAt = 1,
@@ -144,4 +145,60 @@ return function(t)
 		Progression.rebirthMultiplier(config, hugeRebirths),
 		config.rebirth.multiplierCap
 	)
+
+	-- zones
+	local locked = Progression.buyUpgrade(newProfile({ coins = 100000 }, {}, 0), config, "slicer")
+	t:errs("an upgrade behind a shut zone is refused", locked, "UpgradeLocked")
+
+	local poor = Progression.buyZone(newProfile({ coins = 10 }, {}, 0), config, "slicer_bay")
+	t:errs("a zone costs money like anything else", poor, "InsufficientFunds")
+
+	t:errs(
+		"an unknown zone is refused",
+		Progression.buyZone(newProfile({ coins = 100000 }, {}, 0), config, "no_such_zone"),
+		"UnknownZone"
+	)
+
+	local zoneDef = Progression.findZone(config, "slicer_bay")
+	assert(zoneDef ~= nil, "fixture must carry slicer_bay")
+	local buyer = newProfile({ coins = 1000 }, {}, 0)
+	local bought = Progression.buyZone(buyer, config, "slicer_bay")
+	t:check("a zone can be bought", bought.ok, if not bought.ok then bought.message else nil)
+	if bought.ok then
+		t:eq("the zone's price is taken", bought.value.wallet.coins, 1000 - zoneDef.cost)
+		t:eq("the zone is owned afterwards", bought.value.zones.slicer_bay, true)
+		t:errs(
+			"the same zone cannot be bought twice",
+			Progression.buyZone(bought.value, config, "slicer_bay"),
+			"ZoneAlreadyOwned"
+		)
+
+		local opened = table.clone(bought.value)
+		opened.wallet = { coins = 100000 }
+		local unlockedBuy = Progression.buyUpgrade(opened, config, "slicer")
+		t:check(
+			"the zone's upgrade becomes buyable",
+			unlockedBuy.ok,
+			if not unlockedBuy.ok then unlockedBuy.message else nil
+		)
+
+		-- Zones are not in rebirth.resets, and a reset that silently took them would make
+		-- the whole prestige loop feel like a punishment.
+		local reborn = Progression.rebirth(
+			(function()
+				local rich = table.clone(bought.value)
+				rich.wallet = { coins = 10 ^ 9 }
+				return rich
+			end)(),
+			config
+		)
+		t:check("rebirth works with zones owned", reborn.ok)
+		if reborn.ok then
+			t:eq("rebirth keeps zones", reborn.value.zones.slicer_bay, true)
+			t:eq("rebirth still clears upgrades", next(reborn.value.upgrades), nil)
+		end
+	end
+
+	t:eq("an ungated upgrade has no gate", Progression.gateOf(config, "conveyor"), nil)
+	t:eq("a gated upgrade names its zone", Progression.gateOf(config, "slicer"), "slicer_bay")
 end
