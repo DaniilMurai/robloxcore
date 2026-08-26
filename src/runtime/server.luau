@@ -85,6 +85,18 @@ function Runtime:_snapshot(userId: number): StateSnapshot?
 	}
 end
 
+function Runtime:_balances(profile: ProfileData): string
+	local parts = {}
+	for _, currency in self._deps.config.currencies do
+		table.insert(parts, `{currency.id}={profile.wallet[currency.id] or 0}`)
+	end
+	for upgradeId, level in profile.upgrades do
+		table.insert(parts, `{upgradeId}={level}`)
+	end
+	table.sort(parts)
+	return table.concat(parts, " ")
+end
+
 function Runtime:_commit(userId: number, profile: ProfileData)
 	self._profiles[userId] = profile
 	self._deps.data:sync(userId, profile)
@@ -105,7 +117,11 @@ function Runtime:_join(userId: number)
 		return
 	end
 
-	self._profiles[userId] = Profile.touch(loaded.value, deps.clock())
+	local profile = Profile.touch(loaded.value, deps.clock())
+	self._profiles[userId] = profile
+	-- Printed on purpose: AC-6 is verified by comparing this number with the HUD and with
+	-- the matching save line, and Studio's Output is the only place both are visible.
+	print(`[{deps.config.slug}] loaded {userId}: {self:_balances(profile)}`)
 	self:_push(userId)
 end
 
@@ -114,7 +130,9 @@ function Runtime:_leave(userId: number)
 	local profile = self._profiles[userId]
 	if profile then
 		-- Forced save on the way out; the periodic one belongs to the data adapter.
-		deps.data:save(userId, Profile.touch(profile, deps.clock()))
+		local saved = Profile.touch(profile, deps.clock())
+		print(`[{deps.config.slug}] saving {userId}: {self:_balances(saved)}`)
+		deps.data:save(userId, saved)
 	end
 	self._profiles[userId] = nil
 	deps.market:forget(userId)
