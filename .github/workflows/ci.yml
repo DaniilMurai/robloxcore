@@ -1,0 +1,22 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: CompeyDev/setup-rokit@v0.2.1
+
+      - run: wally install
+      - run: lune run tests/run.luau
+      # The AC-4 gate: std = "luau" here, so a Roblox global in the pure layer is an error.
+      - run: selene src/logic/
+      - run: selene --config selene-roblox.toml src
+      - run: stylua --check src tests
+      - run: rojo build -o build.rbxl
