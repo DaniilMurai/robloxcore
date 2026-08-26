@@ -53,6 +53,9 @@ export type StateSnapshot = {
 	upgrades: Upgrades,
 	rebirths: number,
 	incomePerSecond: number,
+	-- Ownership comes from the platform, never from the profile, so the client is told
+	-- what the server currently sees instead of remembering anything itself.
+	ownedPassIds: { string },
 }
 
 export type Action =

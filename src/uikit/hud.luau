@@ -36,6 +36,7 @@ function Hud.new(config: TitleConfig, onAction: (action: Action) -> ())
 		_config = config,
 		_onAction = onAction,
 		_upgradeButtons = {},
+		_passButtons = {},
 		_snapshot = nil,
 	}, Hud)
 end
@@ -66,7 +67,7 @@ function Hud:mount(parent: Instance)
 	self._income.Position = UDim2.new(0, 12, 0, 52)
 
 	local buttons = Instance.new("Frame")
-	buttons.Size = UDim2.new(0, 320, 0, 56 * (#config.upgrades + 1))
+	buttons.Size = UDim2.new(0, 320, 0, 56 * (#config.upgrades + #config.passes + 1))
 	buttons.Position = UDim2.new(0, 16, 0, 124)
 	buttons.BackgroundTransparency = 1
 	buttons.Parent = screen
@@ -94,6 +95,27 @@ function Hud:mount(parent: Instance)
 			self._onAction({ kind = "BuyUpgrade", upgradeId = def.id })
 		end)
 		self._upgradeButtons[def.id] = button
+	end
+
+	for _, def in config.passes do
+		local button = Instance.new("TextButton")
+		button.Size = UDim2.new(1, 0, 0, 48)
+		button.BackgroundColor3 = BACKDROP
+		button.BackgroundTransparency = 0.15
+		button.TextColor3 = ACCENT
+		button.TextScaled = true
+		button.Font = Enum.Font.GothamBold
+		button.Text = def.id
+		button.Parent = buttons
+
+		local passCorner = Instance.new("UICorner")
+		passCorner.CornerRadius = UDim.new(0, 10)
+		passCorner.Parent = button
+
+		button.Activated:Connect(function()
+			self._onAction({ kind = "PromptPass", passId = def.id })
+		end)
+		self._passButtons[def.id] = button
 	end
 
 	local rebirth = Instance.new("TextButton")
@@ -140,6 +162,18 @@ function Hud:update(snapshot: StateSnapshot)
 			-- Affordability is shown, not enforced: the server recomputes the cost anyway,
 			-- and a client-side lock would only hide the InsufficientFunds feedback.
 			button.TextColor3 = if balance >= cost then Color3.new(1, 1, 1) else MUTED
+		end
+	end
+
+	local owned: { [string]: boolean } = {}
+	for _, passId in snapshot.ownedPassIds do
+		owned[passId] = true
+	end
+	for _, def in config.passes do
+		local button = self._passButtons[def.id]
+		if button then
+			button.Text = if owned[def.id] then `{def.id} · owned` else `{def.id} · buy`
+			button.TextColor3 = if owned[def.id] then MUTED else ACCENT
 		end
 	end
 

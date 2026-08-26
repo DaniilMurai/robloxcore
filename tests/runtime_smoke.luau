@@ -28,6 +28,7 @@ local function fakes(config)
 		loadResult = nil :: any,
 		syncFails = false,
 		saveFails = false,
+		owned = {},
 	}
 
 	local data = {
@@ -57,7 +58,7 @@ local function fakes(config)
 
 	local market = {
 		ownedPassIds = function()
-			return {}
+			return state.owned
 		end,
 		promptPass = function() end,
 		promptProduct = function() end,
@@ -136,6 +137,13 @@ return function(t)
 	state.join(USER)
 	t:check("profile is loaded on join", server:profileOf(USER) ~= nil)
 	t:eq("join pushes a first snapshot", #state.snapshots, 1)
+
+	t:eq("snapshot reports no passes when none are owned", #state.snapshots[1].ownedPassIds, 0)
+	state.owned = { "double_coins" }
+	state.ticks[2].handler()
+	local withPass = state.snapshots[#state.snapshots]
+	t:eq("snapshot carries live pass ownership", withPass.ownedPassIds[1], "double_coins")
+	state.owned = {}
 
 	-- Income tick, then a purchase paid for by it.
 	local income = state.ticks[1].handler

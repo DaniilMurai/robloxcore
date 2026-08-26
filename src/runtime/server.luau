@@ -79,11 +79,13 @@ function Runtime:_snapshot(userId: number): StateSnapshot?
 		return nil
 	end
 	local deps: Deps = self._deps
+	local owned = deps.market:ownedPassIds(userId)
 	return {
 		wallet = profile.wallet,
 		upgrades = profile.upgrades,
 		rebirths = profile.rebirths,
-		incomePerSecond = Economy.incomePerSecond(profile, deps.config, deps.market:ownedPassIds(userId)),
+		incomePerSecond = Economy.incomePerSecond(profile, deps.config, owned),
+		ownedPassIds = owned,
 	}
 end
 

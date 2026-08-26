@@ -80,6 +80,65 @@ return function(t)
 		not missingReset.ok and missingReset.message or nil
 	)
 
+	-- ranges: a config can be well-shaped and still describe a broken economy
+	local function broken(mutate)
+		local copy = serde.decode("json", serde.encode("json", fixture))
+		mutate(copy)
+		return Config.validate(copy)
+	end
+
+	local negativeStart = broken(function(c)
+		c.currencies[1].starting = -100
+	end)
+	t:errs("negative starting balance is refused", negativeStart, "ConfigInvalid")
+	t:check(
+		"negative starting message names the field",
+		not negativeStart.ok and negativeStart.message:find("starting", 1, true) ~= nil
+	)
+
+	t:errs(
+		"empty currencies is refused",
+		broken(function(c)
+			c.currencies = {}
+		end),
+		"ConfigInvalid"
+	)
+	t:errs(
+		"zero baseCost is refused",
+		broken(function(c)
+			c.upgrades[1].baseCost = 0
+		end),
+		"ConfigInvalid"
+	)
+	t:errs(
+		"maxLevel below one is refused",
+		broken(function(c)
+			c.upgrades[1].maxLevel = 0
+		end),
+		"ConfigInvalid"
+	)
+	t:errs(
+		"multiplierCap below one is refused",
+		broken(function(c)
+			c.rebirth.multiplierCap = 0.5
+		end),
+		"ConfigInvalid"
+	)
+	t:errs(
+		"negative multiplierPerRebirth is refused",
+		broken(function(c)
+			c.rebirth.multiplierPerRebirth = -1
+		end),
+		"ConfigInvalid"
+	)
+	t:errs(
+		"zero rebirth threshold is refused",
+		broken(function(c)
+			c.rebirth.requirement.base = 0
+		end),
+		"ConfigInvalid"
+	)
+
 	-- original fixture is untouched by validation and by the shallow clones above
 	t:eq("validate does not mutate the raw table", fixture.rebirth ~= nil, true)
 	t:eq("validate does not mutate upgrades growth", fixture.upgrades[1].growth, 1.35)

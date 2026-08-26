@@ -69,6 +69,9 @@ local function validate(raw: any): Result<TitleConfig>
 	if not isTable(raw.currencies) then
 		return fail("currencies must be an array")
 	end
+	if #(raw.currencies :: any) == 0 then
+		return fail("currencies must not be empty")
+	end
 	local currencyIds: { [string]: true } = {}
 	for i, currency in raw.currencies :: any do
 		local path = ("currencies[%d]"):format(i)
@@ -86,6 +89,10 @@ local function validate(raw: any): Result<TitleConfig>
 		end
 		if not isNumber(currency.starting) then
 			return fail(("%s.starting must be a number"):format(path))
+		end
+		-- A negative starting balance is spendable nowhere and shows up as a debt in the HUD.
+		if currency.starting < 0 then
+			return fail(("%s.starting must be >= 0, got %s"):format(path, tostring(currency.starting)))
 		end
 		if currencyIds[currency.id] then
 			return fail(("%s.id %q is duplicated"):format(path, currency.id))
@@ -117,6 +124,9 @@ local function validate(raw: any): Result<TitleConfig>
 		if not isNumber(upgrade.baseCost) then
 			return fail(("%s.baseCost must be a number"):format(path))
 		end
+		if upgrade.baseCost <= 0 then
+			return fail(("%s.baseCost must be > 0, got %s"):format(path, tostring(upgrade.baseCost)))
+		end
 		if not isNumber(upgrade.growth) then
 			return fail(("%s.growth must be a number"):format(path))
 		end
@@ -125,6 +135,9 @@ local function validate(raw: any): Result<TitleConfig>
 		end
 		if not isNumber(upgrade.maxLevel) then
 			return fail(("%s.maxLevel must be a number"):format(path))
+		end
+		if upgrade.maxLevel < 1 then
+			return fail(("%s.maxLevel must be >= 1, got %s"):format(path, tostring(upgrade.maxLevel)))
 		end
 		local effectErr = validateEffect(upgrade.effect, path)
 		if effectErr then
@@ -167,8 +180,22 @@ local function validate(raw: any): Result<TitleConfig>
 	if not isNumber(rebirth.multiplierPerRebirth) then
 		return fail("rebirth.multiplierPerRebirth must be a number")
 	end
+	if rebirth.multiplierPerRebirth < 0 then
+		return fail(
+			("rebirth.multiplierPerRebirth must be >= 0, got %s"):format(
+				tostring(rebirth.multiplierPerRebirth)
+			)
+		)
+	end
 	if not isNumber(rebirth.multiplierCap) then
 		return fail("rebirth.multiplierCap must be a number")
+	end
+	-- A cap below 1 would make every rebirth cut income instead of raising it.
+	if rebirth.multiplierCap < 1 then
+		return fail(("rebirth.multiplierCap must be >= 1, got %s"):format(tostring(rebirth.multiplierCap)))
+	end
+	if not isNumber(rebirth.requirement.base) or rebirth.requirement.base <= 0 then
+		return fail("rebirth.requirement.base must be a number > 0")
 	end
 	if not isTable(rebirth.resets) then
 		return fail("rebirth.resets must be an array")
