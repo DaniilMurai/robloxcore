@@ -139,6 +139,52 @@ return function(t)
 		"ConfigInvalid"
 	)
 
+	t:errs(
+		"missing world is refused",
+		broken(function(c)
+			c.world = nil
+		end),
+		"ConfigInvalid"
+	)
+	t:errs(
+		"missing world part is refused",
+		broken(function(c)
+			c.world.collector = nil
+		end),
+		"ConfigInvalid"
+	)
+	t:errs(
+		"two-component size is refused",
+		broken(function(c)
+			c.world.platform.size = { 40, 1 }
+		end),
+		"ConfigInvalid"
+	)
+	t:errs(
+		"zero size is refused",
+		broken(function(c)
+			c.world.conveyor.size[1] = 0
+		end),
+		"ConfigInvalid"
+	)
+	-- 0..255 is the other common way to spell a colour, and it would silently clip to white
+	t:errs(
+		"colour outside 0..1 is refused",
+		broken(function(c)
+			c.world.dropper.color = { 220, 120, 40 }
+		end),
+		"ConfigInvalid"
+	)
+	local badMaterial = broken(function(c)
+		c.world.platform.material = 7
+	end)
+	t:errs("non-string material is refused", badMaterial, "ConfigInvalid")
+	t:check(
+		"world message names the failing field",
+		not badMaterial.ok and badMaterial.message:find("world.platform.material", 1, true) ~= nil,
+		not badMaterial.ok and badMaterial.message or nil
+	)
+
 	-- original fixture is untouched by validation and by the shallow clones above
 	t:eq("validate does not mutate the raw table", fixture.rebirth ~= nil, true)
 	t:eq("validate does not mutate upgrades growth", fixture.upgrades[1].growth, 1.35)

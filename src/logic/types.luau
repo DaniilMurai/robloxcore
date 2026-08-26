@@ -43,6 +43,21 @@ export type RebirthDef = {
 	resets: { string }, -- what gets zeroed out: currencyId and/or "upgrades"
 }
 
+-- Geometry reaches the pure layer as plain arrays: Vector3 and Color3 are Roblox globals,
+-- and the AC-4 gate keeps them out of src/logic/. runtime/base.luau converts them.
+export type PartStyle = {
+	size: { number }, -- {x, y, z} in studs
+	color: { number }, -- {r, g, b} in 0..1
+	material: string, -- Enum.Material name
+}
+
+export type WorldDef = {
+	platform: PartStyle,
+	conveyor: PartStyle,
+	dropper: PartStyle,
+	collector: PartStyle,
+}
+
 export type PassDef = { id: string, gamepassId: number, effect: Effect }
 export type ProductDef = { id: string, productId: number, grant: { currency: string, amount: number } }
 
@@ -72,6 +87,7 @@ export type TitleConfig = {
 	rebirth: RebirthDef,
 	passes: { PassDef },
 	products: { ProductDef },
+	world: WorldDef,
 }
 
 return { SCHEMA_VERSION = SCHEMA_VERSION }

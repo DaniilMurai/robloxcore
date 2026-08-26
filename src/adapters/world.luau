@@ -3,6 +3,10 @@
 -- EditableMesh, EditableImage, PartOperation or SurfaceAppearance across an auto-publish,
 -- so worlds are built from primitives, colours, materials and SurfaceGui only.
 
+local Types = require("../logic/types")
+
+type PartStyle = Types.PartStyle
+
 export type PartSpec = {
 	size: Vector3,
 	cframe: CFrame,
@@ -24,6 +28,27 @@ function World.part(spec: PartSpec): BasePart
 	part.BottomSurface = Enum.SurfaceType.Smooth
 	part.Parent = spec.parent or workspace
 	return part
+end
+
+-- Config spells materials as names. A typo has to die here, at boot, naming the field,
+-- rather than as a nil assignment that leaves the part plastic and silent.
+function World.material(name: string): Enum.Material
+	for _, item in Enum.Material:GetEnumItems() do
+		if item.Name == name then
+			return item
+		end
+	end
+	error(`unknown material "{name}"`, 2)
+end
+
+function World.fromStyle(style: PartStyle, cframe: CFrame, parent: Instance?): BasePart
+	return World.part({
+		size = Vector3.new(style.size[1], style.size[2], style.size[3]),
+		cframe = cframe,
+		color = Color3.new(style.color[1], style.color[2], style.color[3]),
+		material = World.material(style.material),
+		parent = parent,
+	})
 end
 
 -- Text on a face, not a decal: an uploaded image would need a moderated asset id, and a

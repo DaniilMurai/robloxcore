@@ -51,6 +51,50 @@ local function validateEffect(effect: any, path: string): string?
 	return nil
 end
 
+local WORLD_PARTS = { "platform", "conveyor", "dropper", "collector" }
+
+-- Numeric triples: {x, y, z} in studs and {r, g, b} in 0..1. Material stays a bare string
+-- here; only runtime/base.luau can resolve it against Enum.Material.
+local function validateStyle(style: any, path: string): string?
+	if type(style) ~= "table" then
+		return ("%s must be a table, got %s"):format(path, type(style))
+	end
+	for _, field in { "size", "color" } do
+		local triple = style[field]
+		if type(triple) ~= "table" or #triple ~= 3 then
+			return ("%s.%s must be an array of 3 numbers"):format(path, field)
+		end
+		for i, component in triple do
+			if not isNumber(component) then
+				return ("%s.%s[%d] must be a number"):format(path, field, i)
+			end
+			if field == "size" and component <= 0 then
+				return ("%s.size[%d] must be > 0, got %s"):format(path, i, tostring(component))
+			end
+			if field == "color" and (component < 0 or component > 1) then
+				return ("%s.color[%d] must be within 0..1, got %s"):format(path, i, tostring(component))
+			end
+		end
+	end
+	if not isString(style.material) then
+		return ("%s.material must be a non-empty string"):format(path)
+	end
+	return nil
+end
+
+local function validateWorld(world: any): string?
+	if type(world) ~= "table" then
+		return ("world must be a table, got %s"):format(type(world))
+	end
+	for _, part in WORLD_PARTS do
+		local err = validateStyle(world[part], ("world.%s"):format(part))
+		if err then
+			return err
+		end
+	end
+	return nil
+end
+
 local function validate(raw: any): Result<TitleConfig>
 	if type(raw) ~= "table" then
 		return fail(("config must be a table, got %s"):format(type(raw)))
@@ -279,6 +323,11 @@ local function validate(raw: any): Result<TitleConfig>
 			return fail(("%s.id %q is duplicated"):format(path, product.id))
 		end
 		productIds[product.id] = true
+	end
+
+	local worldErr = validateWorld(raw.world)
+	if worldErr then
+		return fail(worldErr)
 	end
 
 	return Result.ok(raw :: TitleConfig)
