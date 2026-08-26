@@ -23,6 +23,7 @@ export type DataAdapter = {
 	-- Cheap: hands the new profile to ProfileStore's own autosave, no network call. Called
 	-- on every mutation, which a forced save could not be — per-key writes are rate limited.
 	sync: (self: DataAdapter, userId: number, profile: ProfileData) -> Result<true>,
+	-- Yields until ProfileStore confirms the write, or until saveTimeoutSeconds passes.
 	save: (self: DataAdapter, userId: number, profile: ProfileData) -> Result<true>,
 	release: (self: DataAdapter, userId: number) -> (),
 }
@@ -31,7 +32,9 @@ export type Options = {
 	storeName: string,
 	config: TitleConfig,
 	autosaveSeconds: number,
-	maxAttempts: number,
+	-- How long a forced save may wait for confirmation. ProfileStore retries the DataStore
+	-- call itself with its own backoff, so this is a deadline, not an attempt count.
+	saveTimeoutSeconds: number,
 	staleAfterSeconds: number,
 	-- Called from ProfileStore's Cancel handler: the adapter must not know about Players.
 	isActive: (userId: number) -> boolean,
@@ -57,7 +60,14 @@ function DataStoreAdapter.new(opts: Options): DataAdapter
 		_opts = opts,
 		_store = ProfileStore.New(storeName, Profile.new(opts.config, os.time())),
 		_sessions = {},
+		_saved = {}, -- userId -> count of confirmed writes, bumped by OnAfterSave
+		_releasing = {}, -- userId -> true while we are ending the session ourselves
 	}, DataStoreAdapter)
+
+	-- Without this the only trace of a failed write is a warn nobody reads.
+	ProfileStore.OnError:Connect(function(message, failedStore, key)
+		warn(`[data] {failedStore}/{key}: {message}`)
+	end)
 
 	return (self :: any) :: DataAdapter
 end
@@ -91,9 +101,19 @@ function DataStoreAdapter:load(userId: number): Result<ProfileData>
 	local pruned = Profile.pruneReceipts(migrated.value, os.time(), RECEIPT_MAX_AGE)
 	session.Data.processedReceipts = pruned.processedReceipts
 
+	self._saved[userId] = 0
+	session.OnAfterSave:Connect(function()
+		self._saved[userId] += 1
+	end)
+
 	session.OnSessionEnd:Connect(function()
 		self._sessions[userId] = nil
-		if opts.onSessionEnd then
+		-- EndSession() fires this too, so without the flag every ordinary leave and every
+		-- BindToClose would tell the player their save was stolen.
+		local ours = self._releasing[userId] == true
+		self._releasing[userId] = nil
+		self._saved[userId] = nil
+		if opts.onSessionEnd and not ours then
 			opts.onSessionEnd(userId)
 		end
 	end)
@@ -122,34 +142,39 @@ function DataStoreAdapter:sync(userId: number, profile: ProfileData): Result<tru
 	return Result.ok(true)
 end
 
+-- Profile:Save() is fire-and-forget: it spawns the write and never yields or throws, so a
+-- pcall around it proves nothing. The library does retry the DataStore call with its own
+-- backoff, and announces each successful write through OnAfterSave — that signal is the
+-- only honest evidence a save landed, so this waits for it.
 function DataStoreAdapter:save(userId: number, profile: ProfileData): Result<true>
 	local synced = self:sync(userId, profile)
 	if not synced.ok then
 		return synced
 	end
-	local session = self._sessions[userId]
 
-	local delay = 1
-	for attempt = 1, self._opts.maxAttempts do
-		local ok, err = pcall(function()
-			session:Save()
-		end)
-		if ok then
-			return Result.ok(true)
-		end
-		if attempt == self._opts.maxAttempts then
-			return Result.err("DataStoreUnavailable", `save for {userId} failed {attempt}x: {err}`)
-		end
-		task.wait(delay)
-		delay *= 2
+	local session = self._sessions[userId]
+	if session:IsActive() == false then
+		return Result.err("DataStoreUnavailable", `session for {userId} is no longer active`)
 	end
 
-	return Result.err("DataStoreUnavailable", `save for {userId} exhausted attempts`)
+	local before = self._saved[userId] or 0
+	session:Save()
+
+	local deadline = os.clock() + self._opts.saveTimeoutSeconds
+	while (self._saved[userId] or 0) == before do
+		if os.clock() > deadline then
+			return Result.err("DataStoreUnavailable", `save for {userId} was not confirmed in time`)
+		end
+		task.wait(0.1)
+	end
+
+	return Result.ok(true)
 end
 
 function DataStoreAdapter:release(userId: number)
 	local session = self._sessions[userId]
 	if session then
+		self._releasing[userId] = true
 		self._sessions[userId] = nil
 		session:EndSession()
 	end

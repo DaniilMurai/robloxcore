@@ -57,6 +57,8 @@ local KICK_MESSAGES = {
 	ProfileLocked = "Your save is in use on another server. Rejoin in a moment.",
 	SchemaTooNew = "Your save was written by a newer version of the game.",
 	ProfileCorrupt = "Your save could not be read. Nothing was overwritten.",
+	ProfileNotLoaded = "Your save session ended. Rejoin to continue.",
+	DataStoreUnavailable = "Your progress could not be saved. Rejoin in a moment.",
 }
 
 function Runtime.server(deps: Deps): GameServer
@@ -97,9 +99,18 @@ function Runtime:_balances(profile: ProfileData): string
 	return table.concat(parts, " ")
 end
 
+-- A failed sync means the session is gone (stolen, ended, never loaded). Keeping the
+-- profile in memory after that grows a balance nobody is writing down, and the player
+-- keeps playing a run that will vanish — so the session ends here instead.
 function Runtime:_commit(userId: number, profile: ProfileData)
+	local synced = self._deps.data:sync(userId, profile)
+	if not synced.ok then
+		self._profiles[userId] = nil
+		self._deps.market:forget(userId)
+		self._deps.presence:kick(userId, KICK_MESSAGES[synced.code] or synced.message)
+		return
+	end
 	self._profiles[userId] = profile
-	self._deps.data:sync(userId, profile)
 end
 
 function Runtime:_push(userId: number)
@@ -130,9 +141,9 @@ function Runtime:_leave(userId: number)
 	local profile = self._profiles[userId]
 	if profile then
 		-- Forced save on the way out; the periodic one belongs to the data adapter.
-		local saved = Profile.touch(profile, deps.clock())
-		print(`[{deps.config.slug}] saving {userId}: {self:_balances(saved)}`)
-		deps.data:save(userId, saved)
+		local snapshot = Profile.touch(profile, deps.clock())
+		local saved = deps.data:save(userId, snapshot)
+		print(`[{deps.config.slug}] saving {userId}: {self:_balances(snapshot)} ok={saved.ok}`)
 	end
 	self._profiles[userId] = nil
 	deps.market:forget(userId)
@@ -216,6 +227,10 @@ function Runtime:_receipt(userId: number, productId: string, receiptId: string):
 
 	local saved = deps.data:save(userId, granted.value)
 	if not saved.ok then
+		-- The grant is already in the session's data by now, and autosave would carry it to
+		-- disk behind our back. Roblox will resend this receipt, so put the profile back the
+		-- way it was: a granted-but-unacknowledged receipt pays the player twice.
+		deps.data:sync(userId, profile)
 		return false
 	end
 

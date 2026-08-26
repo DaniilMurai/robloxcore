@@ -26,6 +26,8 @@ local function fakes(config)
 		act = nil :: any,
 		receipt = nil :: any,
 		loadResult = nil :: any,
+		syncFails = false,
+		saveFails = false,
 	}
 
 	local data = {
@@ -34,11 +36,17 @@ local function fakes(config)
 		end,
 		sync = function(_, _userId, profile)
 			state.synced += 1
+			if state.syncFails then
+				return { ok = false, code = "ProfileNotLoaded", message = "session gone" }
+			end
 			stored = profile
 			return { ok = true, value = true }
 		end,
 		save = function(_, _userId, profile)
 			state.saved += 1
+			if state.saveFails then
+				return { ok = false, code = "DataStoreUnavailable", message = "not confirmed" }
+			end
 			stored = profile
 			return { ok = true, value = true }
 		end,
@@ -173,6 +181,28 @@ return function(t)
 	t:check("leaving releases the session", state.released)
 
 	t:errs("actions without a profile are refused", state.act(USER, { kind = "Rebirth" }), "ProfileNotLoaded")
+
+	-- A refused write must end the session, not keep a balance nobody is recording.
+	local lost, lostDeps = fakes(config)
+	local lostServer = Runtime.server(lostDeps)
+	lostServer:start()
+	lost.join(USER)
+	lost.syncFails = true
+	lost.ticks[1].handler()
+	t:eq("a refused sync drops the profile", lostServer:profileOf(USER), nil)
+	t:check("a refused sync kicks the player", lost.kicked ~= nil)
+
+	-- An unconfirmed save must leave the receipt unacknowledged AND undo the grant, or
+	-- Roblox resends it and the player is paid twice.
+	local unpaid, unpaidDeps = fakes(config)
+	local unpaidServer = Runtime.server(unpaidDeps)
+	unpaidServer:start()
+	unpaid.join(USER)
+	unpaidDeps.config.products = { product }
+	unpaid.saveFails = true
+	local balanceBefore = unpaidServer:profileOf(USER).wallet.coins
+	t:check("an unconfirmed save is not acknowledged", unpaid.receipt(USER, "starter", "r-1") == false)
+	t:eq("the failed grant is rolled back", unpaidServer:profileOf(USER).wallet.coins, balanceBefore)
 
 	-- A locked save must kick, not silently drop the player into an unsaved session.
 	local locked, lockedDeps = fakes(config)
