@@ -6,7 +6,7 @@
 local Types = require("./types")
 
 local BASE_INTERVAL = 2.0 -- seconds between drops at level 0
-local MIN_INTERVAL = 0.2 -- below this the belt reads as a blur and the part count spikes
+local GAP_FACTOR = 3 -- centre-to-centre spacing, in object lengths
 local HUE_STEP = 0.11 -- hue turn per upgrade level; wraps after nine
 
 local Flow = {}
@@ -19,15 +19,33 @@ function Flow.level(profile: Types.ProfileData): number
 	return total
 end
 
-function Flow.interval(level: number): number
-	return math.max(BASE_INTERVAL / (1 + level), MIN_INTERVAL)
+-- The floor is spacing, not time: objects a fixed number of seconds apart still touch once
+-- they are big enough or the belt is fast enough, and a belt of touching cubes reads as one
+-- painted bar rather than a flow.
+function Flow.minInterval(dropLength: number, studsPerSecond: number): number
+	return dropLength * GAP_FACTOR / studsPerSecond
+end
+
+function Flow.interval(level: number, floor: number): number
+	return math.max(BASE_INTERVAL / (1 + level), floor)
 end
 
 -- Objects alive at once cannot exceed this, whatever the level: the interval has a floor
 -- and a drop lives exactly as long as the crossing. A longer belt legitimately holds more,
 -- so the cap follows the belt instead of being a constant somebody has to keep in sync.
-function Flow.liveCap(travelSeconds: number): number
-	return math.ceil(travelSeconds / MIN_INTERVAL) + 1
+function Flow.liveCap(travelSeconds: number, floor: number): number
+	return math.ceil(travelSeconds / floor) + 1
+end
+
+-- Streams sharing a belt each get their own lane across its depth. Without this, objects
+-- from the base dropper and from every zone travel the same centre line and pile into one
+-- another: three streams look exactly like one, only denser.
+function Flow.lane(index: number, count: number, beltDepth: number, dropDepth: number): number
+	if count <= 1 then
+		return 0
+	end
+	local usable = math.max(beltDepth - dropDepth, 0)
+	return -usable / 2 + usable * (index - 1) / (count - 1)
 end
 
 local function toHsv(rgb: { number }): (number, number, number)

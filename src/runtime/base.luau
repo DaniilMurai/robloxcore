@@ -29,6 +29,7 @@ export type Base = {
 	origin: CFrame,
 	deckHeight: number, -- walking surface above the origin
 	beltY: number, -- local height an object travels at
+	beltDepth: number,
 	platform: BasePart,
 	conveyor: BasePart,
 	dropper: BasePart,
@@ -44,6 +45,7 @@ export type FlowSpec = {
 	style: Types.PartStyle, -- config world.drop; its colour is what level 0 looks like
 	levelOf: () -> number,
 	origin: CFrame?, -- defaults to the base's own dropper; a zone feeds the same belt
+	lane: number?, -- z offset across the belt, so streams do not share one line
 }
 
 export type ZoneSpec = {
@@ -70,7 +72,8 @@ local BELT_CLEARANCE = 1.5 -- studs between the belt surface and an object's cen
 function Base.build(spec: Spec): Base
 	local world = spec.world
 	local platformHeight = world.platform.size[2]
-	local beltLength, beltHeight = world.conveyor.size[1], world.conveyor.size[2]
+	local beltLength, beltHeight, beltDepth =
+		world.conveyor.size[1], world.conveyor.size[2], world.conveyor.size[3]
 	local dropperWidth, dropperHeight = world.dropper.size[1], world.dropper.size[2]
 	local collectorWidth, collectorHeight = world.collector.size[1], world.collector.size[2]
 
@@ -111,6 +114,7 @@ function Base.build(spec: Spec): Base
 		origin = spec.origin,
 		deckHeight = deck,
 		beltY = belt + BELT_CLEARANCE,
+		beltDepth = beltDepth,
 		platform = platform,
 		conveyor = conveyor,
 		dropper = dropper,
@@ -131,15 +135,17 @@ function Base.flow(base: Base, spec: FlowSpec): BaseFlow
 	drops.Name = "Drops"
 	drops.Parent = base.model
 
-	local origin = spec.origin or base.dropOrigin
+	local lane = spec.lane or 0
+	local origin = (spec.origin or base.dropOrigin) * CFrame.new(0, 0, lane)
 	local travelSeconds = (base.dropTarget.Position - origin.Position).Magnitude / BELT_STUDS_PER_SECOND
-	local liveCap = Flow.liveCap(travelSeconds)
+	local floor = Flow.minInterval(spec.style.size[1], BELT_STUDS_PER_SECOND)
+	local liveCap = Flow.liveCap(travelSeconds, floor)
 	local running = true
 
 	task.spawn(function()
 		while running do
 			local level = spec.levelOf()
-			task.wait(Flow.interval(level))
+			task.wait(Flow.interval(level, floor))
 			if not running then
 				break
 			end
@@ -174,10 +180,16 @@ function Base.flow(base: Base, spec: FlowSpec): BaseFlow
 	return flow
 end
 
+-- The base's own dropper takes the first lane, every zone one of the rest.
+local function laneCountOf(zones: { Types.ZoneDef }): number
+	return 1 + #zones
+end
+
 local LOCKED_TRANSPARENCY = 0.65
 local ZONE_PAD_MARGIN = 3 -- studs of pad around the dropper's footprint
 local ZONE_PAD_THICKNESS = 0.4
 local ZONE_POLL_SECONDS = 1
+local ZONE_SIGN_BAND = 0.5 -- top half of the dropper's face: the belt covers the bottom
 
 -- Zones are built shut and opened in place, never built on purchase: a zone that appears
 -- out of nothing gives the player no reason to save up for it.
@@ -191,11 +203,17 @@ function Base.zones(base: Base, spec: ZoneSpec): ZoneBoard
 		dropperStyle.size[1], dropperStyle.size[2], dropperStyle.size[3]
 
 	local built: {
-		[string]: { parts: { BasePart }, sign: TextLabel, flow: BaseFlow?, def: Types.ZoneDef },
+		[string]: {
+			parts: { BasePart },
+			sign: TextLabel,
+			flow: BaseFlow?,
+			def: Types.ZoneDef,
+			lane: number,
+		},
 	} =
 		{}
 
-	for _, zone in spec.zones do
+	for index, zone in spec.zones do
 		local at = base.origin
 			* CFrame.new(zone.position[1], base.deckHeight + zone.position[2], zone.position[3])
 
@@ -220,12 +238,14 @@ function Base.zones(base: Base, spec: ZoneSpec): ZoneBoard
 		local surface = World.sign(
 			zone.name,
 			Vector2.new(dropperWidth * SIGN_PIXELS_PER_STUD, dropperHeight * SIGN_PIXELS_PER_STUD),
-			dropper
+			dropper,
+			ZONE_SIGN_BAND
 		)
 		built[zone.id] = {
 			parts = { pad, dropper },
 			sign = surface:FindFirstChildOfClass("TextLabel") :: TextLabel,
 			def = zone,
+			lane = Flow.lane(index + 1, laneCountOf(spec.zones), base.beltDepth, spec.drop.size[3]),
 		}
 	end
 
@@ -246,6 +266,7 @@ function Base.zones(base: Base, spec: ZoneSpec): ZoneBoard
 					-- The dropper may stand off to the side, but what it drops has to land on
 					-- the belt, so the stream always starts over the belt's centre line.
 					origin = base.origin * CFrame.new(entry.def.position[1], base.beltY, 0),
+					lane = entry.lane,
 				})
 			end
 		end
@@ -275,6 +296,24 @@ function Base.zones(base: Base, spec: ZoneSpec): ZoneBoard
 		end,
 	}
 	return board
+end
+
+-- What a title starts: the base's own stream plus every zone, sharing one lane allocator.
+-- Called separately, the two would both take the centre lane and pile into each other.
+function Base.streams(base: Base, spec: ZoneSpec): ZoneBoard
+	local own = Base.flow(base, {
+		style = spec.drop,
+		levelOf = spec.levelOf,
+		lane = Flow.lane(1, laneCountOf(spec.zones), base.beltDepth, spec.drop.size[3]),
+	})
+	local board = Base.zones(base, spec)
+	local streams: ZoneBoard = {
+		stop = function(_self: ZoneBoard)
+			own:stop()
+			board:stop()
+		end,
+	}
+	return streams
 end
 
 return Base

@@ -53,14 +53,16 @@ end
 
 -- Text on a face, not a decal: an uploaded image would need a moderated asset id, and a
 -- SurfaceGui survives the auto-publish untouched.
-function World.sign(text: string, size: Vector2, parent: BasePart): SurfaceGui
+-- `band` keeps the text in the top fraction of the face: a sign low on a small part is
+-- hidden by whatever stands in front of it, and on a belt that is a moving wall of objects.
+function World.sign(text: string, size: Vector2, parent: BasePart, band: number?): SurfaceGui
 	local surface = Instance.new("SurfaceGui")
 	surface.Face = Enum.NormalId.Front
 	surface.CanvasSize = Vector2.new(size.X, size.Y)
 	surface.PixelsPerStud = 50
 
 	local label = Instance.new("TextLabel")
-	label.Size = UDim2.fromScale(1, 1)
+	label.Size = UDim2.fromScale(1, band or 1)
 	label.BackgroundTransparency = 1
 	label.Text = text
 	label.TextScaled = true
