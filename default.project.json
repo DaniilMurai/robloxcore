@@ -1,0 +1,15 @@
+{
+  "name": "robloxcore",
+  "tree": {
+    "$className": "DataModel",
+    "ReplicatedStorage": {
+      "Packages": {
+        "$className": "Folder",
+        "robloxcore": { "$path": "src" }
+      }
+    },
+    "ServerScriptService": {
+      "ServerPackages": { "$path": "ServerPackages" }
+    }
+  }
+}

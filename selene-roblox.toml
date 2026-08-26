@@ -1,0 +1,3 @@
+# Roblox layers (adapters/runtime/uikit) are linted against the Roblox std, unlike
+# src/logic/, whose whole point is that those globals stay undefined (AC-4).
+std = "roblox"
