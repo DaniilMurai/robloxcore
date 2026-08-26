@@ -29,6 +29,9 @@ local function fakes(config)
 		syncFails = false,
 		saveFails = false,
 		owned = {},
+		claimed = {},
+		releasedPlots = {},
+		syncedProfiles = 0,
 	}
 
 	local data = {
@@ -98,6 +101,18 @@ local function fakes(config)
 		end,
 	}
 
+	local world = {
+		claim = function(_, userId)
+			table.insert(state.claimed, userId)
+		end,
+		release = function(_, userId)
+			table.insert(state.releasedPlots, userId)
+		end,
+		sync = function(_, _userId, _profile)
+			state.syncedProfiles += 1
+		end,
+	}
+
 	local scheduler = {
 		every = function(_, seconds, handler)
 			table.insert(state.ticks, { seconds = seconds, handler = handler })
@@ -113,6 +128,7 @@ local function fakes(config)
 			presence = presence,
 			transport = transport,
 			scheduler = scheduler,
+			world = world,
 			clock = function()
 				return NOW
 			end,
@@ -137,6 +153,8 @@ return function(t)
 	state.join(USER)
 	t:check("profile is loaded on join", server:profileOf(USER) ~= nil)
 	t:eq("join pushes a first snapshot", #state.snapshots, 1)
+	t:eq("join claims a plot", state.claimed[1], USER)
+	t:check("the claimed plot is told the profile straight away", state.syncedProfiles >= 1)
 
 	t:eq("snapshot reports no passes when none are owned", #state.snapshots[1].ownedPassIds, 0)
 	state.owned = { "double_coins" }
@@ -220,4 +238,26 @@ return function(t)
 	locked.join(USER)
 	t:check("locked profile kicks the player", locked.kicked ~= nil)
 	t:eq("no profile is kept after a kick", lockedServer:profileOf(USER), nil)
+
+	-- A plot nobody gives back is a plot the next player never gets
+	local leaveState, leaveDeps = fakes(config)
+	local leaveServer = Runtime.server(leaveDeps)
+	leaveServer:start()
+	leaveState.join(USER)
+	local syncsAtJoin = leaveState.syncedProfiles
+	leaveState.ticks[1].handler()
+	t:check("a changed balance reaches the world", leaveState.syncedProfiles > syncsAtJoin)
+	leaveState.leave(USER)
+	t:eq("leaving frees the plot", leaveState.releasedPlots[1], USER)
+
+	-- A lost session ends the same way as walking out, so the plot has to come back too
+	local stolenState, stolenDeps = fakes(config)
+	local stolenServer = Runtime.server(stolenDeps)
+	stolenServer:start()
+	stolenState.join(USER)
+	stolenState.syncFails = true
+	stolenState.ticks[1].handler()
+	t:eq("a kicked player keeps no profile", stolenServer:profileOf(USER), nil)
+	stolenState.leave(USER)
+	t:eq("a kicked player's plot is freed", stolenState.releasedPlots[1], USER)
 end

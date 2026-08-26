@@ -9,7 +9,6 @@ local Economy = require("../logic/economy")
 local Progression = require("../logic/progression")
 local Profile = require("../logic/profile")
 local Events = require("../logic/events")
-local Flow = require("../logic/flow")
 
 type ProfileData = Types.ProfileData
 type TitleConfig = Types.TitleConfig
@@ -30,6 +29,14 @@ export type Transport = {
 	onAction: (self: Transport, handler: (userId: number, action: Action) -> Result<StateSnapshot>) -> (),
 }
 
+-- The world's side of a player's session. Optional: a title without a built world still
+-- runs, it just has nothing to show.
+export type WorldHost = {
+	claim: (self: WorldHost, userId: number) -> (),
+	release: (self: WorldHost, userId: number) -> (),
+	sync: (self: WorldHost, userId: number, profile: ProfileData) -> (),
+}
+
 export type Scheduler = {
 	every: (self: Scheduler, seconds: number, handler: () -> ()) -> (),
 }
@@ -42,6 +49,7 @@ export type Deps = {
 	presence: Presence,
 	transport: Transport,
 	scheduler: Scheduler,
+	world: WorldHost?,
 	clock: () -> number,
 	snapshotHeartbeat: number,
 }
@@ -49,11 +57,7 @@ export type Deps = {
 export type GameServer = {
 	start: (self: GameServer) -> (),
 	profileOf: (self: GameServer, userId: number) -> ProfileData?,
-	visible: (self: GameServer) -> VisibleState,
 }
-
--- What the one shared base shows. Per-player plots replace this with a profile each.
-export type VisibleState = { level: number, zones: { [string]: true } }
 
 local Runtime = {}
 Runtime.__index = Runtime
@@ -76,24 +80,6 @@ end
 
 function Runtime:profileOf(userId: number): ProfileData?
 	return self._profiles[userId]
-end
-
--- One shared base shows the furthest-along player on the server, not a sum and not the
--- last one to tick: a sum would race ahead of anything a single player recognises as his,
--- and the last-one-wins version flickers between players. Level and zones come from the
--- same player, or a base could run a zone's dropper for someone who has not bought it.
-function Runtime:visible(): VisibleState
-	local best, bestLevel = nil, -1
-	for _, profile in self._profiles do
-		local level = Flow.level(profile)
-		if level > bestLevel then
-			best, bestLevel = profile, level
-		end
-	end
-	if best == nil then
-		return { level = 0, zones = {} }
-	end
-	return { level = bestLevel, zones = best.zones }
 end
 
 function Runtime:_snapshot(userId: number): StateSnapshot?
@@ -142,6 +128,10 @@ function Runtime:_commit(userId: number, profile: ProfileData)
 		return
 	end
 	self._profiles[userId] = profile
+	local world = self._deps.world
+	if world then
+		world:sync(userId, profile)
+	end
 end
 
 function Runtime:_push(userId: number)
@@ -165,6 +155,10 @@ function Runtime:_join(userId: number)
 	-- the matching save line, and Studio's Output is the only place both are visible.
 	print(`[{deps.config.slug}] loaded {userId}: {self:_balances(profile)}`)
 	self:_push(userId)
+	if deps.world then
+		deps.world:claim(userId)
+		deps.world:sync(userId, profile)
+	end
 end
 
 function Runtime:_leave(userId: number)
@@ -179,6 +173,9 @@ function Runtime:_leave(userId: number)
 	self._profiles[userId] = nil
 	deps.market:forget(userId)
 	deps.data:release(userId)
+	if deps.world then
+		deps.world:release(userId)
+	end
 end
 
 function Runtime:_act(userId: number, action: Action): Result<StateSnapshot>
@@ -277,6 +274,9 @@ function Runtime:_receipt(userId: number, productId: string, receiptId: string):
 	end
 
 	self._profiles[userId] = granted.value
+	if deps.world then
+		deps.world:sync(userId, granted.value)
+	end
 	self:_push(userId)
 	return true
 end

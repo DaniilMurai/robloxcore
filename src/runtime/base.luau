@@ -38,6 +38,7 @@ export type Base = {
 	-- never has to know the base's layout.
 	dropOrigin: CFrame,
 	dropTarget: CFrame,
+	sign: TextLabel, -- the collector's face; a plot renames it when someone claims it
 	destroy: (self: Base) -> (),
 }
 
@@ -58,6 +59,10 @@ export type ZoneSpec = {
 
 export type ZoneBoard = {
 	stop: (self: ZoneBoard) -> (),
+	-- Called when the owner's profile changes. Pushed rather than polled: a poll would
+	-- have to be slow enough not to burn a server and fast enough to open a zone the
+	-- moment it is paid for, and there is no such period.
+	refresh: (self: ZoneBoard) -> (),
 }
 
 export type BaseFlow = {
@@ -100,7 +105,7 @@ function Base.build(spec: Spec): Base
 		model
 	)
 
-	World.sign(
+	local surface = World.sign(
 		spec.signText,
 		Vector2.new(collectorWidth * SIGN_PIXELS_PER_STUD, collectorHeight * SIGN_PIXELS_PER_STUD),
 		collector
@@ -121,6 +126,7 @@ function Base.build(spec: Spec): Base
 		collector = collector,
 		dropOrigin = spec.origin * CFrame.new(beltLength / 2 - 1, belt + BELT_CLEARANCE, 0),
 		dropTarget = spec.origin * CFrame.new(-beltLength / 2, belt + BELT_CLEARANCE, 0),
+		sign = surface:FindFirstChildOfClass("TextLabel") :: TextLabel,
 		destroy = function(self: Base)
 			self.model:Destroy()
 		end,
@@ -188,7 +194,6 @@ end
 local LOCKED_TRANSPARENCY = 0.65
 local ZONE_PAD_MARGIN = 3 -- studs of pad around the dropper's footprint
 local ZONE_PAD_THICKNESS = 0.4
-local ZONE_POLL_SECONDS = 1
 local ZONE_SIGN_BAND = 0.5 -- top half of the dropper's face: the belt covers the bottom
 
 -- Zones are built shut and opened in place, never built on purchase: a zone that appears
@@ -209,6 +214,7 @@ function Base.zones(base: Base, spec: ZoneSpec): ZoneBoard
 			flow: BaseFlow?,
 			def: Types.ZoneDef,
 			lane: number,
+			shown: boolean?, -- what the parts currently show, so refresh can skip no-ops
 		},
 	} =
 		{}
@@ -249,11 +255,16 @@ function Base.zones(base: Base, spec: ZoneSpec): ZoneBoard
 		}
 	end
 
-	local running = true
-
 	local function apply(owned: { [string]: true })
 		for zoneId, entry in built do
 			local isOwned = owned[zoneId] == true
+			-- Refresh runs on every profile change, which includes the once-a-second income
+			-- tick. Repainting unchanged parts sixty times a minute per plot is work nobody
+			-- can see, so a zone is dressed once per state change.
+			if entry.shown == isOwned then
+				continue
+			end
+			entry.shown = isOwned
 			for _, part in entry.parts do
 				part.Transparency = if isOwned then 0 else LOCKED_TRANSPARENCY
 				part.CanCollide = isOwned
@@ -273,20 +284,12 @@ function Base.zones(base: Base, spec: ZoneSpec): ZoneBoard
 	end
 
 	apply(spec.ownedOf())
-	-- Polled rather than pushed: the server already owns the profile and the world reads
-	-- from it, and one poll a second is cheaper than threading a signal through the core.
-	task.spawn(function()
-		while running do
-			task.wait(ZONE_POLL_SECONDS)
-			if running then
-				apply(spec.ownedOf())
-			end
-		end
-	end)
 
 	local board: ZoneBoard = {
+		refresh = function(_self: ZoneBoard)
+			apply(spec.ownedOf())
+		end,
 		stop = function(_self: ZoneBoard)
-			running = false
 			for _, entry in built do
 				if entry.flow then
 					entry.flow:stop()
@@ -308,6 +311,9 @@ function Base.streams(base: Base, spec: ZoneSpec): ZoneBoard
 	})
 	local board = Base.zones(base, spec)
 	local streams: ZoneBoard = {
+		refresh = function(_self: ZoneBoard)
+			board:refresh()
+		end,
 		stop = function(_self: ZoneBoard)
 			own:stop()
 			board:stop()
