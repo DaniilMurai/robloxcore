@@ -46,6 +46,20 @@ export type RebirthDef = {
 export type PassDef = { id: string, gamepassId: number, effect: Effect }
 export type ProductDef = { id: string, productId: number, grant: { currency: string, amount: number } }
 
+-- Wire shapes. The client never sends amounts, only intent: every cost is recomputed
+-- server-side from the config.
+export type StateSnapshot = {
+	wallet: Wallet,
+	upgrades: Upgrades,
+	rebirths: number,
+	incomePerSecond: number,
+}
+
+export type Action =
+	{ kind: "BuyUpgrade", upgradeId: string }
+	| { kind: "Rebirth" }
+	| { kind: "PromptPass", passId: string }
+
 export type TitleConfig = {
 	slug: string,
 	displayName: string,
