@@ -68,6 +68,18 @@ return function(t)
 		not duplicate.ok and duplicate.message or nil
 	)
 
+	-- rebirth threshold currency must be reset, otherwise rebirth is repeatable for free
+	local noResetForThreshold = table.clone(fixture)
+	noResetForThreshold.rebirth = table.clone(fixture.rebirth)
+	noResetForThreshold.rebirth.resets = { "upgrades" }
+	local missingReset = Config.validate(noResetForThreshold)
+	t:errs("rebirth currency missing from resets is ConfigInvalid", missingReset, "ConfigInvalid")
+	t:check(
+		"missing reset message names the field",
+		not missingReset.ok and missingReset.message:find("resets", 1, true) ~= nil,
+		not missingReset.ok and missingReset.message or nil
+	)
+
 	-- original fixture is untouched by validation and by the shallow clones above
 	t:eq("validate does not mutate the raw table", fixture.rebirth ~= nil, true)
 	t:eq("validate does not mutate upgrades growth", fixture.upgrades[1].growth, 1.35)

@@ -173,6 +173,7 @@ local function validate(raw: any): Result<TitleConfig>
 	if not isTable(rebirth.resets) then
 		return fail("rebirth.resets must be an array")
 	end
+	local resetIds: { [string]: true } = {}
 	for i, reset in rebirth.resets :: any do
 		local path = ("rebirth.resets[%d]"):format(i)
 		if not isString(reset) then
@@ -181,6 +182,16 @@ local function validate(raw: any): Result<TitleConfig>
 		if reset ~= "upgrades" and not currencyIds[reset] then
 			return fail(('%s must be "upgrades" or an existing currency, got %q'):format(path, reset))
 		end
+		resetIds[reset] = true
+	end
+	-- Without this, the threshold currency survives a rebirth and the same balance
+	-- buys another rebirth immediately: a free, repeatable multiplier.
+	if not resetIds[rebirth.requirement.currency] then
+		return fail(
+			("rebirth.requirement.currency %q must be listed in rebirth.resets"):format(
+				rebirth.requirement.currency
+			)
+		)
 	end
 
 	if not isTable(raw.passes) then
