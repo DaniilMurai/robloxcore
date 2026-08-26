@@ -4,8 +4,7 @@
 
 local AnalyticsService = game:GetService("AnalyticsService")
 
-local Packages = script.Parent.Parent
-local Events = require(Packages.logic.events)
+local Events = require("../logic/events")
 
 type EconomyEvent = Events.EconomyEvent
 type ProgressionEvent = Events.ProgressionEvent

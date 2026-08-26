@@ -5,8 +5,7 @@
 local MarketplaceService = game:GetService("MarketplaceService")
 local Players = game:GetService("Players")
 
-local Packages = script.Parent.Parent
-local Types = require(Packages.logic.types)
+local Types = require("../logic/types")
 
 type TitleConfig = Types.TitleConfig
 

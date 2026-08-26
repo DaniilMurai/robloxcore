@@ -2,10 +2,9 @@
 -- Procedural HUD: balance, income, rebirth state and one button per upgrade. Built from
 -- code rather than a .rbxm so a title's screen changes with its config, not by hand.
 
-local Packages = script.Parent.Parent
-local Types = require(Packages.logic.types)
-local Economy = require(Packages.logic.economy)
-local Progression = require(Packages.logic.progression)
+local Types = require("../logic/types")
+local Economy = require("../logic/economy")
+local Progression = require("../logic/progression")
 
 type TitleConfig = Types.TitleConfig
 type StateSnapshot = Types.StateSnapshot

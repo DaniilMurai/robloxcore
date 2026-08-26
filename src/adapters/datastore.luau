@@ -8,10 +8,9 @@ local ServerScriptService = game:GetService("ServerScriptService")
 
 local ProfileStore = require(ServerScriptService.ServerPackages.ProfileStore)
 
-local Packages = script.Parent.Parent
-local Types = require(Packages.logic.types)
-local Result = require(Packages.logic.result)
-local Profile = require(Packages.logic.profile)
+local Types = require("../logic/types")
+local Result = require("../logic/result")
+local Profile = require("../logic/profile")
 
 type ProfileData = Types.ProfileData
 type TitleConfig = Types.TitleConfig
@@ -21,6 +20,9 @@ local RECEIPT_MAX_AGE = 90 * 24 * 60 * 60 -- Roblox never resends a receipt this
 
 export type DataAdapter = {
 	load: (self: DataAdapter, userId: number) -> Result<ProfileData>,
+	-- Cheap: hands the new profile to ProfileStore's own autosave, no network call. Called
+	-- on every mutation, which a forced save could not be — per-key writes are rate limited.
+	sync: (self: DataAdapter, userId: number, profile: ProfileData) -> Result<true>,
 	save: (self: DataAdapter, userId: number, profile: ProfileData) -> Result<true>,
 	release: (self: DataAdapter, userId: number) -> (),
 }
@@ -105,18 +107,27 @@ function DataStoreAdapter:load(userId: number): Result<ProfileData>
 	return Result.ok(session.Data)
 end
 
-function DataStoreAdapter:save(userId: number, profile: ProfileData): Result<true>
+function DataStoreAdapter:sync(userId: number, profile: ProfileData): Result<true>
 	local session = self._sessions[userId]
 	if session == nil then
 		return Result.err("ProfileNotLoaded", `no session for {userId}`)
 	end
 
-	-- Field-by-field for the same reason as above: the saved table must stay the same table.
+	-- Field-by-field, not a reassignment: ProfileStore saves the table it handed out.
 	session.Data.wallet = profile.wallet
 	session.Data.upgrades = profile.upgrades
 	session.Data.rebirths = profile.rebirths
 	session.Data.processedReceipts = profile.processedReceipts
 	session.Data.stats = profile.stats
+	return Result.ok(true)
+end
+
+function DataStoreAdapter:save(userId: number, profile: ProfileData): Result<true>
+	local synced = self:sync(userId, profile)
+	if not synced.ok then
+		return synced
+	end
+	local session = self._sessions[userId]
 
 	local delay = 1
 	for attempt = 1, self._opts.maxAttempts do
